@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { io, Socket } from 'socket.io-client';
+import { createClient } from '@supabase/supabase-js';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   PlusCircle, 
@@ -16,6 +16,13 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+
+// Configuração do Supabase (As chaves serão injetadas via variáveis de ambiente no Netlify)
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+// Inicializa apenas se as chaves existirem para evitar erro fatal
+const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
 
 interface ContentLog {
   id: number;
@@ -35,31 +42,50 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
-    // Initial fetch
-    fetch('/api/contents')
-      .then(res => {
-        if (!res.ok) throw new Error(`Erro ${res.status}`);
-        return res.json();
-      })
-      .then(data => setContents(data))
-      .catch(err => {
-        console.error('Erro ao carregar conteúdos:', err);
-        setStatus({ type: 'error', message: 'Erro ao carregar dados iniciais.' });
-      });
-
-    // Socket setup
-    const socket: Socket = io();
+    if (!supabase) return;
     
-    socket.on('content_added', (newContent: ContentLog) => {
-      setContents(prev => [newContent, ...prev]);
-    });
+    const loadContents = async () => {
+      const today = format(new Date(), "yyyy-MM-dd");
+      const { data, error } = await supabase
+        .from('content_logs')
+        .select('*')
+        .eq('date', today)
+        .order('created_at', { ascending: false });
 
-    socket.on('content_deleted', (id: string) => {
-      setContents(prev => prev.filter(c => c.id !== parseInt(id)));
-    });
+      if (error) {
+        console.error('Erro ao carregar conteúdos:', error);
+      } else {
+        setContents(data || []);
+      }
+    };
+
+    loadContents();
+
+    // Setup Real-time do Supabase (Funciona no Netlify!)
+    const channel = supabase
+      .channel('schema-db-changes')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'content_logs' },
+        (payload) => {
+          const newContent = payload.new as ContentLog;
+          // Só adiciona se for de hoje
+          if (newContent.date === format(new Date(), "yyyy-MM-dd")) {
+            setContents(prev => [newContent, ...prev]);
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'content_logs' },
+        (payload) => {
+          setContents(prev => prev.filter(c => c.id !== payload.old.id));
+        }
+      )
+      .subscribe();
 
     return () => {
-      socket.disconnect();
+      supabase.removeChannel(channel);
     };
   }, []);
 
@@ -70,35 +96,42 @@ export default function App() {
       return;
     }
 
+    if (!supabase) {
+      setStatus({ type: 'error', message: 'Configuração do banco de dados pendente no Netlify.' });
+      return;
+    }
+
     setIsLoading(true);
     try {
-      const res = await fetch('/api/contents', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, designer }),
-      });
+      const today = format(new Date(), "yyyy-MM-dd");
+      const currentTime = format(new Date(), "HH:mm:ss");
 
-      // Check if response is JSON before parsing
-      const contentType = res.headers.get("content-type");
-      let data;
-      if (contentType && contentType.indexOf("application/json") !== -1) {
-        data = await res.json();
-      } else {
-        const text = await res.text();
-        throw new Error(`O servidor não retornou JSON. Status: ${res.status}. Resposta: ${text.substring(0, 100)}`);
+      // Verificar duplicidade
+      const { data: existing } = await supabase
+        .from('content_logs')
+        .select('id')
+        .eq('title', title)
+        .eq('date', today)
+        .maybeSingle();
+
+      if (existing) {
+        setStatus({ type: 'error', message: 'Este conteúdo já foi registrado hoje.' });
+        return;
       }
 
-      if (res.ok) {
-        setStatus({ type: 'success', message: 'Conteúdo registrado com sucesso!' });
-        setTitle('');
-      } else {
-        setStatus({ type: 'error', message: data.error || 'Erro ao registrar conteúdo.' });
-      }
+      const { error } = await supabase
+        .from('content_logs')
+        .insert([{ title, designer, date: today, time: currentTime }]);
+
+      if (error) throw error;
+
+      setStatus({ type: 'success', message: 'Conteúdo registrado com sucesso!' });
+      setTitle('');
     } catch (err) {
       console.error('Erro na requisição:', err);
       setStatus({ 
         type: 'error', 
-        message: `Erro: ${err instanceof Error ? err.message : 'Falha na comunicação com o servidor'}` 
+        message: `Erro: ${err instanceof Error ? err.message : 'Falha ao salvar no banco de dados'}` 
       });
     } finally {
       setIsLoading(false);
@@ -109,11 +142,49 @@ export default function App() {
   const handleDelete = async (id: number) => {
     if (!confirm('Tem certeza que deseja excluir este registro?')) return;
 
+    if (!supabase) return;
+
     try {
-      const res = await fetch(`/api/contents/${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error();
+      const { error } = await supabase
+        .from('content_logs')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
     } catch (err) {
+      console.error('Erro ao excluir:', err);
       alert('Erro ao excluir registro.');
+    }
+  };
+
+  const handleDownload = async () => {
+    if (!supabase) return;
+
+    try {
+      const { data, error } = await supabase
+        .from('content_logs')
+        .select('title, designer, date, time')
+        .order('date', { ascending: false });
+
+      if (error) throw error;
+
+      let csv = "\ufeffNome do Conteudo,Designer,Data,Hora\n";
+      data.forEach((row: any) => {
+        csv += `"${row.title.replace(/"/g, '""')}","${row.designer.replace(/"/g, '""')}",${row.date},${row.time}\n`;
+      });
+
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement("a");
+      const url = URL.createObjectURL(blob);
+      link.setAttribute("href", url);
+      link.setAttribute("download", "pampa_controle.csv");
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err) {
+      console.error('Erro no download:', err);
+      alert('Erro ao gerar planilha.');
     }
   };
 
@@ -161,6 +232,15 @@ export default function App() {
       </header>
 
       <main className="max-w-6xl mx-auto px-6 py-10 grid grid-cols-1 lg:grid-cols-12 gap-10">
+        {!supabase && (
+          <div className="lg:col-span-12 bg-red-50 border border-red-200 p-6 rounded-2xl flex items-center gap-4 text-red-800">
+            <AlertCircle className="shrink-0" />
+            <div>
+              <p className="font-bold">Configuração Necessária</p>
+              <p className="text-sm">Para o sistema funcionar no Netlify, você precisa configurar as variáveis <b>VITE_SUPABASE_URL</b> e <b>VITE_SUPABASE_ANON_KEY</b> no painel do Netlify.</p>
+            </div>
+          </div>
+        )}
         
         {/* Left Column: Registration Form */}
         <div className="lg:col-span-4 space-y-8">
@@ -338,14 +418,13 @@ export default function App() {
           </div>
         </div>
         <div className="text-center space-y-4">
-          <a 
-            href="/api/export" 
-            download
+          <button 
+            onClick={handleDownload}
             className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-lg text-[10px] font-bold text-gray-500 hover:text-orange-600 hover:border-orange-200 hover:bg-orange-50 transition-all uppercase tracking-widest shadow-sm active:scale-95"
           >
             <Download size={12} />
             Baixar Planilha (CSV)
-          </a>
+          </button>
           <div className="block">
             <a 
               href="https://instagram.com/cleiton.asix" 
