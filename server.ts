@@ -43,6 +43,7 @@ app.get("/api/contents", (req, res) => {
 
 app.post("/api/contents", async (req, res) => {
   const { title, designer } = req.body;
+  console.log(`[API] Tentativa de registro: "${title}" por ${designer}`);
 
   if (!title || !designer) {
     return res.status(400).json({ error: "Título e Designer são obrigatórios." });
@@ -51,21 +52,25 @@ app.post("/api/contents", async (req, res) => {
   const today = format(new Date(), "yyyy-MM-dd");
   const currentTime = format(new Date(), "HH:mm:ss");
 
-  // Check for duplicate title today
-  const existing = db.prepare("SELECT id FROM content_logs WHERE title = ? AND date = ?").get(title, today);
-  if (existing) {
-    return res.status(400).json({ error: "Este conteúdo já foi registrado hoje." });
-  }
-
   try {
+    // Check for duplicate title today
+    const existing = db.prepare("SELECT id FROM content_logs WHERE title = ? AND date = ?").get(title, today);
+    if (existing) {
+      console.log(`[API] Duplicidade detectada: "${title}"`);
+      return res.status(400).json({ error: "Este conteúdo já foi registrado hoje." });
+    }
+
     const info = db.prepare("INSERT INTO content_logs (title, designer, date, time) VALUES (?, ?, ?, ?)").run(title, designer, today, currentTime);
     const newEntry = { id: info.lastInsertRowid, title, designer, date: today, time: currentTime };
     
+    console.log(`[API] Sucesso: ID ${info.lastInsertRowid}`);
+
     // Notify clients
     io.emit("content_added", newEntry);
 
     res.status(201).json(newEntry);
   } catch (error) {
+    console.error("[API] Erro ao salvar no banco:", error);
     res.status(500).json({ error: "Erro ao salvar no banco de dados." });
   }
 });

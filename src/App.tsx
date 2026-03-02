@@ -81,7 +81,11 @@ export default function App() {
         setStatus({ type: 'error', message: data.error || 'Erro ao registrar conteúdo.' });
       }
     } catch (err) {
-      setStatus({ type: 'error', message: 'Erro de conexão com o servidor.' });
+      console.error('Erro na requisição:', err);
+      setStatus({ 
+        type: 'error', 
+        message: `Erro de conexão: ${err instanceof Error ? err.message : 'Servidor inacessível'}` 
+      });
     } finally {
       setIsLoading(false);
       setTimeout(() => setStatus(null), 3000);
