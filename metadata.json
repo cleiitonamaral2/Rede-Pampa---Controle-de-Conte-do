@@ -1,0 +1,5 @@
+{
+  "name": "Rede Pampa - Controle de Conteúdo",
+  "description": "Sistema interno para registro e controle de conteúdos produzidos pelos designers da Rede Pampa, com integração ao Google Sheets e prevenção de duplicidade.",
+  "requestFramePermissions": []
+}
