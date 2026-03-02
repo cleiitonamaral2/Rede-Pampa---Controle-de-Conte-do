@@ -1,4 +1,5 @@
 import express from "express";
+import cors from "cors";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import { createServer as createViteServer } from "vite";
@@ -10,6 +11,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const app = express();
+app.use(cors());
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
@@ -35,6 +37,10 @@ db.exec(`
 app.use(express.json());
 
 // API Routes
+app.get("/api/health", (req, res) => {
+  res.json({ status: "ok", time: new Date().toISOString() });
+});
+
 app.get("/api/contents", (req, res) => {
   const today = format(new Date(), "yyyy-MM-dd");
   const contents = db.prepare("SELECT * FROM content_logs WHERE date = ? ORDER BY created_at DESC").all(today);

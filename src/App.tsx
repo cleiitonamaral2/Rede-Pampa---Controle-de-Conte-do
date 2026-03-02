@@ -37,8 +37,15 @@ export default function App() {
   useEffect(() => {
     // Initial fetch
     fetch('/api/contents')
-      .then(res => res.json())
-      .then(data => setContents(data));
+      .then(res => {
+        if (!res.ok) throw new Error(`Erro ${res.status}`);
+        return res.json();
+      })
+      .then(data => setContents(data))
+      .catch(err => {
+        console.error('Erro ao carregar conteúdos:', err);
+        setStatus({ type: 'error', message: 'Erro ao carregar dados iniciais.' });
+      });
 
     // Socket setup
     const socket: Socket = io();
@@ -71,12 +78,19 @@ export default function App() {
         body: JSON.stringify({ title, designer }),
       });
 
-      const data = await res.json();
+      // Check if response is JSON before parsing
+      const contentType = res.headers.get("content-type");
+      let data;
+      if (contentType && contentType.indexOf("application/json") !== -1) {
+        data = await res.json();
+      } else {
+        const text = await res.text();
+        throw new Error(`O servidor não retornou JSON. Status: ${res.status}. Resposta: ${text.substring(0, 100)}`);
+      }
 
       if (res.ok) {
         setStatus({ type: 'success', message: 'Conteúdo registrado com sucesso!' });
         setTitle('');
-        // Keep designer name for convenience
       } else {
         setStatus({ type: 'error', message: data.error || 'Erro ao registrar conteúdo.' });
       }
@@ -84,7 +98,7 @@ export default function App() {
       console.error('Erro na requisição:', err);
       setStatus({ 
         type: 'error', 
-        message: `Erro de conexão: ${err instanceof Error ? err.message : 'Servidor inacessível'}` 
+        message: `Erro: ${err instanceof Error ? err.message : 'Falha na comunicação com o servidor'}` 
       });
     } finally {
       setIsLoading(false);
