@@ -11,7 +11,8 @@ import {
   AlertCircle,
   Trash2,
   LayoutDashboard,
-  Filter
+  Filter,
+  Download
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -313,20 +314,30 @@ export default function App() {
           <div className="flex gap-6">
             <span className="flex items-center gap-1.5">
               <div className="w-2 h-2 bg-orange-500 rounded-full animate-pulse"></div>
-              Sincronizado com Google Sheets
+              Sistema Ativo
             </span>
-            <span>Versão 1.0.0</span>
+            <span>Versão 1.1.0</span>
           </div>
         </div>
-        <div className="text-center">
+        <div className="text-center space-y-4">
           <a 
-            href="https://instagram.com/cleiton.asix" 
-            target="_blank" 
-            rel="noopener noreferrer"
-            className="text-[10px] text-gray-400 hover:text-orange-500 transition-colors font-medium uppercase tracking-widest"
+            href="/api/export" 
+            download
+            className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-lg text-[10px] font-bold text-gray-500 hover:text-orange-600 hover:border-orange-200 hover:bg-orange-50 transition-all uppercase tracking-widest shadow-sm active:scale-95"
           >
-            criado por Cleiton.asix
+            <Download size={12} />
+            Baixar Planilha (CSV)
           </a>
+          <div className="block">
+            <a 
+              href="https://instagram.com/cleiton.asix" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="text-[10px] text-gray-400 hover:text-orange-500 transition-colors font-medium uppercase tracking-widest"
+            >
+              criado por Cleiton.asix
+            </a>
+          </div>
         </div>
       </footer>
     </div>

@@ -3,7 +3,6 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import { createServer as createViteServer } from "vite";
 import Database from "better-sqlite3";
-import { google } from "googleapis";
 import path from "path";
 import { format } from "date-fns";
 import dotenv from "dotenv";
@@ -35,38 +34,6 @@ db.exec(`
 
 app.use(express.json());
 
-// Google Sheets Auth
-const getGoogleSheets = async () => {
-  const auth = new google.auth.JWT({
-    email: process.env.GOOGLE_SHEETS_CLIENT_EMAIL,
-    key: process.env.GOOGLE_SHEETS_PRIVATE_KEY?.replace(/\\n/g, "\n"),
-    scopes: ["https://www.googleapis.com/auth/spreadsheets"],
-  });
-  return google.sheets({ version: "v4", auth });
-};
-
-const syncToSheets = async (title: string, designer: string, date: string, time: string) => {
-  try {
-    const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
-    if (!spreadsheetId || !process.env.GOOGLE_SHEETS_CLIENT_EMAIL) {
-      console.warn("Google Sheets credentials missing. Skipping sync.");
-      return;
-    }
-
-    const sheets = await getGoogleSheets();
-    await sheets.spreadsheets.values.append({
-      spreadsheetId,
-      range: "A:D",
-      valueInputOption: "USER_ENTERED",
-      requestBody: {
-        values: [[title, designer, date, time]],
-      },
-    });
-  } catch (error) {
-    console.error("Error syncing to Google Sheets:", error);
-  }
-};
-
 // API Routes
 app.get("/api/contents", (req, res) => {
   const today = format(new Date(), "yyyy-MM-dd");
@@ -94,9 +61,6 @@ app.post("/api/contents", async (req, res) => {
     const info = db.prepare("INSERT INTO content_logs (title, designer, date, time) VALUES (?, ?, ?, ?)").run(title, designer, today, currentTime);
     const newEntry = { id: info.lastInsertRowid, title, designer, date: today, time: currentTime };
     
-    // Sync to Google Sheets
-    await syncToSheets(title, designer, today, currentTime);
-
     // Notify clients
     io.emit("content_added", newEntry);
 
@@ -115,6 +79,29 @@ app.delete("/api/contents/:id", async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: "Erro ao excluir registro." });
+  }
+});
+
+app.get("/api/export", (req, res) => {
+  try {
+    const contents = db.prepare("SELECT title, designer, date, time FROM content_logs ORDER BY date DESC, time DESC").all();
+    
+    // CSV Header
+    let csv = "Nome do Conteúdo,Designer,Data,Hora\n";
+    
+    // CSV Rows
+    contents.forEach((row: any) => {
+      // Escape quotes and commas
+      const title = `"${row.title.replace(/"/g, '""')}"`;
+      const designer = `"${row.designer.replace(/"/g, '""')}"`;
+      csv += `${title},${designer},${row.date},${row.time}\n`;
+    });
+
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", "attachment; filename=controle_conteudo_pampa.csv");
+    res.status(200).send(csv);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao exportar dados." });
   }
 });
 
